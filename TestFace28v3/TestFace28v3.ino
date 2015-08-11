@@ -1,3 +1,5 @@
+//Realize playing mp3 and switch pictures also can work with touch screen
+//but when switching picture you can experience delay in sound
 #include <SPI.h>
 #include <SdFat.h>
 #include <SdFatUtil.h>
@@ -20,7 +22,7 @@
 #define SD_SPI_SPEED SPI_HALF_SPEED // SD card SPI speed, try SPI_FULL_SPEED
 
 
-// These are common pins between breakout and shield 
+// These are common pins between breakout and shield
 //SD caard on the aduio chip
 #define CARDCS 24    // Chip Select for SD card
 
@@ -54,25 +56,30 @@ Adafruit_FT6206 ctp = Adafruit_FT6206();
 // DREQ should be an Int pin, see http://arduino.cc/en/Reference/attachInterrupt
 #define DREQ 23       // VS1053 Data request, ideally an Interrupt pin
 
-Adafruit_VS1053_FilePlayer musicPlayer = 
+Adafruit_VS1053_FilePlayer musicPlayer =
   // create breakout-example object!
-  Adafruit_VS1053_FilePlayer(BREAKOUT_RESET, BREAKOUT_CS, BREAKOUT_DCS, DREQ, CARDCS);
+Adafruit_VS1053_FilePlayer(BREAKOUT_RESET, BREAKOUT_CS, BREAKOUT_DCS, DREQ, CARDCS);
 
 
 //variable define
-bool drawstatus=0;
-bool menustatus=0;
-bool touchstatus=0;
-int px=0;
-int py=0;
-
+bool drawstatus = 0;
+bool menustatus = 0;
+bool touchstatus = 0;
+int px = 0;
+int py = 0;
+unsigned long currentMillis = 0;
+int touchSreeninterval = 100;
+unsigned long previousTouchscreenmillis = 0;
+unsigned long tftAnimationinterval = 2000;
+unsigned long previousTftanimation = 0;
+TS_Point p;
 
 void setup() {
 
   pinMode(13, OUTPUT);
-  pinMode(12,OUTPUT);
-  digitalWrite(13,1);
-  digitalWrite(12,1);
+  pinMode(12, OUTPUT);
+  digitalWrite(13, 1);
+  digitalWrite(12, 1);
 
 
   Serial.begin(115200);
@@ -86,21 +93,21 @@ void setup() {
   }
   Serial.println(F("VS1053 found"));
 
-    musicPlayer.sineTest(0x44, 500);    // Make a tone to indicate VS1053 is working
+  musicPlayer.sineTest(0x44, 500);    // Make a tone to indicate VS1053 is working
 
-    progmemPrint(PSTR("Initializing SD card..."));
+  progmemPrint(PSTR("Initializing SD card..."));
 
-    if (!SD.begin(CARDCS, SD_SPI_SPEED)){
-      progmemPrintln(PSTR("failed!"));
-      return;
-    }
-    progmemPrintln(PSTR("OK!"));
+  if (!SD.begin(CARDCS, SD_SPI_SPEED)) {
+    progmemPrintln(PSTR("failed!"));
+    return;
+  }
+  progmemPrintln(PSTR("OK!"));
 
   // list files
   //printDirectory(SD.open("/"), 0);
-  
+
   // Set volume for left, right channels. lower numbers == louder volume!
-  musicPlayer.setVolume(20,20);
+  musicPlayer.setVolume(20, 20);
 
   // This option uses a pin interrupt. No timers required! But DREQ
   // must be on an interrupt pin. For Uno/Duemilanove/Diecimilla
@@ -108,12 +115,12 @@ void setup() {
   // See http://arduino.cc/en/Reference/attachInterrupt for other pins
   // *** This method is preferred
   if (! musicPlayer.useInterrupt(VS1053_FILEPLAYER_PIN_INT))
-  Serial.println(F("DREQ pin is not an interrupt pin"));
+    Serial.println(F("DREQ pin is not an interrupt pin"));
 
   //printDirectory(SD.open("/"), 0);
 
   if (! musicPlayer.useInterrupt(VS1053_FILEPLAYER_PIN_INT))
-  Serial.println(F("DREQ pin is not an interrupt pin"));
+    Serial.println(F("DREQ pin is not an interrupt pin"));
 
 
   while (!Serial) ; // wait for Arduino Serial Monitor
@@ -123,96 +130,62 @@ void setup() {
 
 
   ctp.begin();
-    if (! ctp.begin(40)) {  // pass in 'sensitivity' coefficient
+  if (! ctp.begin(40)) {  // pass in 'sensitivity' coefficient
     Serial.println("Couldn't start FT6206 touchscreen controller");
-    while (1);
+  while (1);
 }
 
 Serial.println("Capacitive touchscreen started");
   // read diagnostics (optional but can help debug problems)
-  tft.setRotation(iliRotation90);
-  tft.fillScreen(BLACK);
+tft.setRotation(iliRotation90);
+tft.fillScreen(BLACK);
   //  tft.fillRoundRect(40,130,80,20,5,PINK);
   //  tft.fillRoundRect(200,130,80,20,5,PINK);
-  tft.drawBitmap(leftEyenor, 0, 40, 120, 110, WHITE);
-  tft.drawBitmap(rightEyenor, 200, 40, 120, 110, WHITE);
-  Serial.println(F("Done!"));
+tft.drawBitmap(leftEyenor, 0, 40, 120, 110, WHITE);
+tft.drawBitmap(rightEyenor, 200, 40, 120, 110, WHITE);
+Serial.println(F("Done!"));
+attachInterrupt(31, updateTouchscreen, FALLING);
+musicPlayer.startPlayingFile("track001.mp3");
 }
 
 void loop()
 {
-    if (! musicPlayer.startPlayingFile("track001.mp3")) {
-    Serial.println("Could not open file track001.mp3");
-    while (1);
-  }
-//  Serial.println(F("Started playing"))
+  currentMillis = millis();
   
-  while (musicPlayer.playingMusic) 
+  if (!musicPlayer.paused()) {
+    //    Serial.println("Paused");
+    musicPlayer.pausePlaying(true);
+  }
+  px = map(p.y, 0, 320, 320, 0);
+  py = p.x;
+  Serial.print(px);
+  Serial.print('\t');
+  Serial.println(py);
+
+
+  if (currentMillis - previousTftanimation >= tftAnimationinterval)
   {
-      eyeBlink(1);
-//    touchstatus=ctp.touched();
-//    TS_Point p = ctp.getPoint();
-//    px = map(p.y, 0, 320, 320, 0);
-//    py = p.x;
-//    Serial.print(px);
-//    Serial.print('\t');
-//    Serial.println(py);
-//    if (menustatus==0) 
-//    {
-//      if (! touchstatus) {
-//
-//        return;
-//      }
-//
-//
-//      if (px<100 && py>120)
-//      {
-//        eyeAkward(100);
-//      }
-//      else if (px>200 && py>120)
-//      {
-//        eyeLove(100);
-//      }
-//      else if (px>=100 && px<= 200 && py>120)
-//      {
-//        eyeBlink(1);
-//      }
-//      else
-//      {
-//        bmpDraw("apple.bmp",0,0);
-//        menustatus=1;
-//      }
-//    }
-//    else
-//    {
-//      if (! touchstatus) {
-//        if(drawstatus==1)
-//        {
-//          bmpDraw("apple.bmp",0,0);
-//          drawstatus=0;
-//        }
-//
-//        return;
-//      }
-//      if (drawstatus==0)
-//      {
-//        bmpDraw("pingguo.bmp",0,0);
-//        drawstatus=1;
-//      }
-//      if (px>200 && py>120)
-//      {
-//        menustatus=0;
-//        tft.fillScreen(BLACK);
-//        tft.drawBitmap(leftEyenor, 0, 40, 120, 110, WHITE);
-//        tft.drawBitmap(rightEyenor, 200, 40, 120, 110, WHITE);
-//      }
-//    }
+    if(drawstatus==1)
+    {
+      bmpDraw("apple.bmp",0,0);
+      drawstatus=0;
+    }
+    else
+    {
+      bmpDraw("pingguo.bmp",0,0);
+      drawstatus=1;  
+    }
+    previousTftanimation = currentMillis;
+  }
+  if (musicPlayer.paused()) {
+    //    Serial.println("Resumed");
+    musicPlayer.pausePlaying(false);
   }
 }
 
 void eyeBlink(int counts)
 {
-  for (int i=1;i<=counts;i++)
+  for (int i = 1; i <= counts; i++)
   {
     tft.fillRect(40, 40, 80, 80, BLACK);
     tft.fillRect(200, 40, 80, 80, BLACK);
@@ -232,23 +205,23 @@ void eyeBlink(int counts)
     tft.drawBitmap(eyeFull, 200, 40, 80, 80, WHITE);
     delay(100);
   }
-//  delay(1000);
+  //  delay(1000);
 }
 void eyeAkward(int duration)
 {
   tft.fillRect(40, 40, 80, 80, BLACK);
   tft.drawBitmap(eyeJiong, 40, 40, 80, 80, WHITE);
-  delay(duration);
+  //  delay(duration);
   tft.fillRect(40, 40, 80, 80, BLACK);
   tft.drawBitmap(eyeFull, 40, 40, 80, 80, WHITE);
 }
-void eyeLove(int duration)
+void eyeLove()
 {
   tft.fillRect(40, 40, 80, 80, BLACK);
   tft.fillRect(200, 40, 80, 80, BLACK);
   tft.drawBitmap(eyeHeart, 40, 40, 80, 80, PINK);
   tft.drawBitmap(eyeHeart, 200, 40, 80, 80, PINK);
-  delay(duration);
+  //  delay(duration);
   tft.fillRect(40, 40, 80, 80, BLACK);
   tft.fillRect(200, 40, 80, 80, BLACK);
   tft.drawBitmap(eyeFull, 40, 40, 80, 80, WHITE);
@@ -260,7 +233,7 @@ void eyeLove(int duration)
 // by reading many pixels worth of data at a time
 // (rather than pixel by pixel).  Increasing the buffer
 // size takes more of the Arduino's RAM but
-// makes loading a little faster.  
+// makes loading a little faster.
 
 void bmpDraw(char* filename, int x, int y) {
 
@@ -337,14 +310,14 @@ void bmpDraw(char* filename, int x, int y) {
           uint16_t buffer[BUFFPIXELCOUNT]; // pixel buffer
 
           bmpFile.seekSet(54);  //skip header
-          uint32_t totalPixels = (uint32_t)bmpWidth*(uint32_t)bmpHeight;
+          uint32_t totalPixels = (uint32_t)bmpWidth * (uint32_t)bmpHeight;
           uint16_t numFullBufferRuns = totalPixels / BUFFPIXELCOUNT;
           for (uint32_t p = 0; p < numFullBufferRuns; p++) {
             // read pixels into the buffer
             bmpFile.read(buffer, 2 * BUFFPIXELCOUNT);
             // push them to the diplay
             tft.pushColors(buffer, 0, BUFFPIXELCOUNT);
-            
+
           }
 
           // render any remaining pixels that did not fully fit the buffer
@@ -375,9 +348,9 @@ void bmpDraw(char* filename, int x, int y) {
             // (avoids a lot of cluster math in SD library).
 
             if (flip) // Bitmap is stored bottom-to-top order (normal BMP)
-            pos = bmpImageoffset + (bmpHeight - 1 - row) * rowSize;
+              pos = bmpImageoffset + (bmpHeight - 1 - row) * rowSize;
             else     // Bitmap is stored top-to-bottom
-            pos = bmpImageoffset + row * rowSize;
+              pos = bmpImageoffset + row * rowSize;
             if (bmpFile.curPosition() != pos) { // Need seek?
               bmpFile.seekSet(pos);
             }
@@ -470,25 +443,15 @@ void progmemPrintln(const char *str) {
   Serial.println();
 }
 
-//void PrintHex8(uint8_t *data, uint8_t length) // prints 8-bit data in hex
-//{
-//  char tmp[length*5+1];
-//  byte first;
-//  byte second;
-//  for (int i=0; i<length; i++) {
-//    first = (data[i] >> 4) & 0x0f;
-//    second = data[i] & 0x0f;
-//    // base for converting single digit numbers to ASCII is 48
-//    // base for 10-16 to become upper-case characters A-F is 55
-//    // note: difference is 7
-//    tmp[i*5] = 48; // add leading 0
-//    tmp[i*5+1] = 120; // add leading x
-//    tmp[i*5+2] = first+48;
-//    tmp[i*5+3] = second+48;
-//    tmp[i*5+4] = 32; // add trailing space
-//    if (first > 9) tmp[i*5+2] += 7;
-//    if (second > 9) tmp[i*5+3] += 7;
-//  }
-//  tmp[length*5] = 0;
-//  Serial.print(tmp);
-//}
+void updateTouchscreen()
+{
+  if (currentMillis - previousTouchscreenmillis >= touchSreeninterval)
+  {
+    previousTouchscreenmillis = currentMillis;
+    touchstatus = ctp.touched();
+    p = ctp.getPoint();
+
+  }
+}
+
+
